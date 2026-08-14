@@ -60,7 +60,7 @@ async def visit(session, url, token, uid, data):
         "Host": url.replace("https://", "").split("/")[0]
     }
     try:
-        async with session.post(url, headers=headers, data=data, ssl=False) as resp:
+        async with session.post(url, headers=headers, data=data, ssl=False, timeout=5) as resp:
             if resp.status == 200:
                 return True, await resp.read()
             return False, None
@@ -69,7 +69,7 @@ async def visit(session, url, token, uid, data):
 
 async def send_visits(tokens, uid, server_name):
     url = get_url(server_name)
-    connector = aiohttp.TCPConnector(limit=0)
+    connector = aiohttp.TCPConnector(limit=100)
     total_success = 0
     total_sent = 0
     player_info = None
@@ -78,16 +78,16 @@ async def send_visits(tokens, uid, server_name):
         encrypted = encrypt_api("08" + Encrypt_ID(str(uid)) + "1801")
         data = bytes.fromhex(encrypted)
 
-        for token in tokens:
-            success, response = await visit(session, url, token, uid, data)
+        # 🔥 PARALLEL — semua token dikirim bersamaan
+        tasks = [visit(session, url, token, uid, data) for token in tokens]
+        results = await asyncio.gather(*tasks)
+
+        for success, response in results:
             total_sent += 1
             if success:
                 total_success += 1
-                print(f"✅ Success [{total_success}] UID: {uid} | Token: {token[:20]}...")
                 if player_info is None and response:
                     player_info = parse_protobuf_response(response)
-            else:
-                print(f"❌ Fail | UID: {uid}")
 
     return total_success, total_sent, player_info
 
@@ -105,7 +105,7 @@ def detect_region(uid):
         }
         try:
             import requests
-            resp = requests.post(url, data=bytes.fromhex(encrypted), headers=headers, verify=False, timeout=5)
+            resp = requests.post(url, data=bytes.fromhex(encrypted), headers=headers, verify=False, timeout=3)
             if resp.status_code == 200:
                 info = Info()
                 info.ParseFromString(resp.content)
