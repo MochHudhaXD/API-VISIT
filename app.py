@@ -100,7 +100,7 @@ def detect_region(uid):
         url = get_url(region)
         headers = {
             "Authorization": f"Bearer {tokens[0]}",
-            "ReleaseVersion": "OB54",
+            "ReleaseVersion": "OB55",
             "X-GA": "v1 1"
         }
         try:
