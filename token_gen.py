@@ -1,20 +1,20 @@
 import requests
 import json
 import time
-import hashlib
 import os
 
 # ============ KONFIGURASI ============
 AKUN_FILE = "akun.txt"
-BASE_URL = "https://ff-jwt-gen-api.lovable.app"
+BASE_URL = "https://jwt-auto.vercel.app"
+TOKEN_ENDPOINT = "/token"
 TOKEN_FILES = {
-    "BD": "token_bd.json",
-    "ID": "token_id.json",
+    "BD":  "token_bd.json",
+    "ID":  "token_id.json",
     "IND": "token_ind.json",
-    "BR": "token_br.json",
-    "US": "token_br.json",
+    "BR":  "token_br.json",
+    "US":  "token_br.json",
     "SAC": "token_br.json",
-    "NA": "token_br.json"
+    "NA":  "token_br.json",
 }
 
 # ============ BACA AKUN.TXT ============
@@ -23,12 +23,12 @@ def load_accounts():
     if not os.path.exists(AKUN_FILE):
         print(f"[!] File {AKUN_FILE} tidak ditemukan!")
         return accounts
-    with open(AKUN_FILE, 'r') as f:
+    with open(AKUN_FILE, "r") as f:
         for line in f:
             line = line.strip()
-            if not line or line.startswith('#'):
+            if not line or line.startswith("#"):
                 continue
-            parts = line.split(':')
+            parts = line.split(":")
             if len(parts) >= 2:
                 uid = parts[0].strip()
                 pw = parts[1].strip()
@@ -38,52 +38,42 @@ def load_accounts():
 
 # ============ GENERATE TOKEN VIA API ============
 def get_token(uid, password):
-    # Method 1: GET
-    try:
-        url = f"{BASE_URL}/api/public/token?guest_uid={uid}&guest_password={password}"
-        resp = requests.get(url, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            token = data.get("token") or data.get("access_token")
-            if token:
-                return token
-    except:
-        pass
+    url = f"{BASE_URL}{TOKEN_ENDPOINT}"
+    params = {"uid": uid, "password": password}
 
-    # Method 2: POST form
+    # GET /token?uid=UID&password=PASS
     try:
-        url = f"{BASE_URL}/api/public/token"
-        resp = requests.post(url, data={"guest_uid": uid, "guest_password": password}, timeout=10)
+        resp = requests.get(url, params=params, timeout=15)
         if resp.status_code == 200:
             data = resp.json()
-            token = data.get("token") or data.get("access_token")
+            token = (
+                data.get("token")
+                or data.get("token_access")
+                or data.get("access_token")
+                or (data.get("data") or {}).get("token")
+            )
             if token:
                 return token
-    except:
-        pass
+            print(f"[!] 200 tanpa field token: {data}")
+        else:
+            print(f"[!] HTTP {resp.status_code}: {resp.text[:200]}")
+    except Exception as e:
+        print(f"[!] Error GET: {e}")
 
-    # Method 3: POST JSON
+    # Fallback POST form — sebagian deploy baca dari body
     try:
-        resp = requests.post(url, json={"guest_uid": uid, "guest_password": password}, timeout=10)
+        resp = requests.post(url, data=params, timeout=15)
         if resp.status_code == 200:
             data = resp.json()
-            token = data.get("token") or data.get("access_token")
+            token = (
+                data.get("token")
+                or data.get("token_access")
+                or data.get("access_token")
+                or (data.get("data") or {}).get("token")
+            )
             if token:
                 return token
-    except:
-        pass
-
-    # Method 4: MD5 hash
-    try:
-        pw_md5 = hashlib.md5(password.encode()).hexdigest()
-        url = f"{BASE_URL}/api/public/token?guest_uid={uid}&guest_password={pw_md5}"
-        resp = requests.get(url, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            token = data.get("token") or data.get("access_token")
-            if token:
-                return token
-    except:
+    except Exception:
         pass
 
     print(f"[!] Gagal generate token untuk UID: {uid}")
@@ -94,7 +84,7 @@ def save_tokens(region_tokens):
     for region, tokens in region_tokens.items():
         filepath = TOKEN_FILES.get(region, "token_bd.json")
         formatted = [{"token": t["token"]} for t in tokens]
-        with open(filepath, 'w') as f:
+        with open(filepath, "w") as f:
             json.dump(formatted, f, indent=2)
         print(f"[✓] {len(tokens)} token disimpan ke {filepath}")
 
@@ -114,15 +104,10 @@ def refresh_tokens():
         print(f"[*] UID: {uid} ({region})...")
         token = get_token(uid, pw)
         if token:
-            if region not in region_tokens:
-                region_tokens[region] = []
-            region_tokens[region].append({
-                "uid": uid,
-                "token": token
-            })
+            region_tokens.setdefault(region, []).append({"uid": uid, "token": token})
             print(f"    [+] Token: {token[:30]}...")
         else:
-            print(f"    [-] Gagal")
+            print("    [-] Gagal")
         time.sleep(0.5)
 
     if region_tokens:
