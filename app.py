@@ -10,7 +10,6 @@ app = Flask(__name__)
 ALL_REGIONS = ["BD", "ID", "IND", "BR", "US", "SAC", "NA"]
 TARGET_SUCCESS = 1000
 
-
 def load_tokens(server_name):
     try:
         if server_name == "IND":
@@ -26,9 +25,9 @@ def load_tokens(server_name):
             data = json.load(f)
 
         return [item["token"] for item in data if "token" in item and item["token"] not in ["", "N/A"]]
-    except:
+    except Exception as e:
+        print(f"Token load error ({server_name}): {e}")
         return []
-
 
 def get_url(server_name):
     if server_name == "IND":
@@ -39,7 +38,6 @@ def get_url(server_name):
         return "https://clientbp.ggpolarbear.com/GetPlayerPersonalShow"
     else:
         return "https://clientbp.ggblueshark.com/GetPlayerPersonalShow"
-
 
 def parse_protobuf_response(response_data):
     try:
@@ -55,22 +53,24 @@ def parse_protobuf_response(response_data):
     except:
         return None
 
-
-async def visit(session, url, token, uid, data):
-    headers = {
+def build_headers(token, url):
+    return {
         "ReleaseVersion": "OB55",
         "X-GA": "v1 1",
         "Authorization": f"Bearer {token}",
-        "Host": url.replace("https://", "").split("/")[0]
+        "Host": url.replace("https://", "").split("/")[0],
+        "Content-Type": "application/octet-stream",
+        "User-Agent": "UnityPlayer/2019.4.40f1 (UnityWebRequest/1.0, libcurl/7.80.0-DEV)"
     }
+
+async def visit(session, url, token, uid, data):
     try:
-        async with session.post(url, headers=headers, data=data, ssl=False, timeout=5) as resp:
+        async with session.post(url, headers=build_headers(token, url), data=data, ssl=False, timeout=5) as resp:
             if resp.status == 200:
                 return True, await resp.read()
             return False, None
     except:
         return False, None
-
 
 async def send_until_target(tokens, uid, server_name, target_success=TARGET_SUCCESS):
     url = get_url(server_name)
@@ -112,56 +112,46 @@ async def send_until_target(tokens, uid, server_name, target_success=TARGET_SUCC
 
     return total_success, total_sent, player_info
 
-
-def detect_region(uid):
+async def detect_region_async(uid):
     encrypted = encrypt_api("08" + Encrypt_ID(str(uid)) + "1801")
-    for region in ALL_REGIONS:
-        tokens = load_tokens(region)
-        if not tokens:
-            continue
-        url = get_url(region)
-        headers = {
-            "Authorization": f"Bearer {tokens[0]}",
-            "ReleaseVersion": "OB55",
-            "X-GA": "v1 1"
-        }
-        try:
-            import requests
-            resp = requests.post(url, data=bytes.fromhex(encrypted), headers=headers, verify=False, timeout=3)
-            if resp.status_code == 200:
-                info = Info()
-                info.ParseFromString(resp.content)
-                if info.AccountInfo.UID > 0:
-                    return region
-        except:
-            continue
+    data = bytes.fromhex(encrypted)
+    connector = aiohttp.TCPConnector(limit=10)
+
+    async with aiohttp.ClientSession(connector=connector) as session:
+        for region in ALL_REGIONS:
+            tokens = load_tokens(region)
+            if not tokens:
+                print(f"[Detect] Skipping {region}: no tokens")
+                continue
+            url = get_url(region)
+            try:
+                async with session.post(url, headers=build_headers(tokens[0], url), data=data, ssl=False, timeout=5) as resp:
+                    print(f"[Detect] {region} -> {resp.status}")
+                    if resp.status == 200:
+                        resp_data = await resp.read()
+                        info = Info()
+                        info.ParseFromString(resp_data)
+                        if info.AccountInfo.UID > 0:
+                            print(f"[Detect] Match: {region}")
+                            return region
+            except Exception as e:
+                print(f"[Detect] {region} error: {e}")
+                continue
     return None
 
-
-@app.route('/<int:uid>', methods=['GET'])
-def send_visits_auto(uid):
-    print(f"\nAuto-detecting region for UID: {uid}")
-    region = detect_region(uid)
-
-    if not region:
-        return jsonify({"error": "Could not detect region for this UID"}), 400
-
-    print(f"Region detected: {region}")
+def process_visits(uid, region):
     tokens = load_tokens(region)
-
     if not tokens:
-        return jsonify({"error": "No valid tokens found"}), 500
+        return jsonify({"error": f"No valid tokens found for region {region}"}), 500
 
     print(f"Sending visits to UID: {uid} | Server: {region} | Tokens: {len(tokens)}")
-
     total_success, total_sent, player_info = asyncio.run(
         send_until_target(tokens, uid, region, target_success=TARGET_SUCCESS)
     )
-
     print(f"\nDONE! Total success: {total_success} | Total sent: {total_sent}")
 
     if player_info:
-        response_data = {
+        return jsonify({
             "fail": TARGET_SUCCESS - total_success,
             "level": player_info.get("level", 0),
             "likes": player_info.get("likes", 0),
@@ -169,11 +159,31 @@ def send_visits_auto(uid):
             "region": player_info.get("region", ""),
             "success": total_success,
             "uid": player_info.get("uid", 0)
-        }
-        return jsonify(response_data), 200
+        }), 200
     else:
         return jsonify({"error": "Could not decode player information"}), 500
 
+@app.route('/<int:uid>', methods=['GET'])
+def send_visits_auto(uid):
+    print(f"\nAuto-detecting region for UID: {uid}")
+    region = asyncio.run(detect_region_async(uid))
+
+    if not region:
+        return jsonify({
+            "error": "Could not detect region for this UID",
+            "hint": "Coba manual: /ID/1569, /IND/1569, /BD/1569"
+        }), 400
+
+    print(f"Region detected: {region}")
+    return process_visits(uid, region)
+
+@app.route('/<string:server>/<int:uid>', methods=['GET'])
+def send_visits_manual(server, uid):
+    region = server.upper()
+    valid = {"BD", "ID", "IND", "BR", "US", "SAC", "NA"}
+    if region not in valid:
+        return jsonify({"error": f"Invalid region. Use one of: {list(valid)}"}), 400
+    return process_visits(uid, region)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5600, debug=True)
