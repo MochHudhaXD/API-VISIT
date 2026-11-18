@@ -35,7 +35,7 @@ def get_url(server_name):
     elif server_name in {"BR", "US", "SAC", "NA"}:
         return "https://client.us.freefiremobile.com/GetPlayerPersonalShow"
     elif server_name == "ID":
-        return "https://clientbp.ggpolarbear.com/GetPlayerPersonalShow"
+        return "https://clientbp.ppmainecoonghj.com/GetPlayerPersonalShow"
     else:
         return "https://clientbp.ggblueshark.com/GetPlayerPersonalShow"
 
