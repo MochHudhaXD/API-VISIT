@@ -5,7 +5,7 @@ import os
 
 # ============ KONFIGURASI ============
 AKUN_FILE = "akun.txt"
-BASE_URL = "https://jwt-auto.vercel.app"
+BASE_URL = "https://jwt-auto-dha.vercel.app"
 TOKEN_ENDPOINT = "/token"
 TOKEN_FILES = {
     "BD":  "token_bd.json",
