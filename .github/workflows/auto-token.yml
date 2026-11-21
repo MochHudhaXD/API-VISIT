@@ -2,7 +2,7 @@ name: Auto Generate Token
 
 on:
   schedule:
-    - cron: '0 */3 * * *'   # setiap 3 jam
+    - cron: '0 */7 * * *'   # setiap 3 jam
   workflow_dispatch:        # bisa jalan manual
 
 jobs:
